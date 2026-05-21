@@ -4,6 +4,14 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "给你的秘密页面",
   description: "这个世界上，只有你会看到这里。一封藏在互联网里的互动式情书。",
+  robots: {
+    index: false,
+    follow: false,
+    googleBot: {
+      index: false,
+      follow: false
+    }
+  },
   openGraph: {
     title: "给你的秘密页面",
     description: "这个世界上，只有你会看到这里。",
