@@ -6,11 +6,24 @@ import { motion, useScroll, useTransform } from "framer-motion";
 import { ArrowRight, Check, Heart, LockKeyhole, Sparkles, UserRound, Volume2 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import {
+  clearCosmosData,
+  COSMOS_DATE_CHOICES,
+  DEFAULT_COSMOS_CONFIG,
+  readCosmosConfig,
+  readCosmosSnapshot,
+  readSiteMode,
+  unlockCosmos,
+  writeSiteMode,
+  type CosmosConfig,
+  type CosmosSnapshot,
+  type DateChoiceId,
+  type PermissionChoice,
+  type SiteMode
+} from "./lib/cosmos-storage";
 
 type SceneKey = "opening" | "letter" | "memories" | "confession" | "ending";
 type EndingStage = "idle" | "permission" | "heartbeat" | "nickname" | "keepsake" | "date" | "couple";
-type PermissionChoice = "once" | "forever" | null;
-type DateChoiceId = "dinner" | "movie" | "walk" | "you";
 
 const soundtrack: Record<SceneKey, { title: string; mood: string; src: string; notes: number[] }> = {
   opening: {
@@ -82,13 +95,36 @@ const memories = [
 ];
 
 const permissionItems = ["每天想你", "看到好看的东西想发给你", "晚安认真说", "见到你还是会紧张", "偷偷把你放进未来计划"];
-const dateChoices: Array<{ id: DateChoiceId; label: string; note: string }> = [
-  { id: "dinner", label: "一起吃饭", note: "把普通晚餐变成正式开始" },
-  { id: "movie", label: "看电影", note: "把故事看到灯亮以后" },
-  { id: "walk", label: "散步到很晚", note: "慢慢走 慢慢靠近" },
-  { id: "you", label: "你来安排", note: "我负责认真期待" }
-];
+const dateChoices = COSMOS_DATE_CHOICES;
 const HEARTBEAT_COMPLETE_DELAY_MS = 2600;
+const START_DATE_ISO = "2026-03-25";
+
+function parseStableDate(value: string) {
+  const fallback = new Date(`${START_DATE_ISO}T00:00:00+08:00`);
+  const normalized = value.trim().replace(/[./]/g, "-");
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized);
+  if (!match) return fallback;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const candidate = new Date(`${normalized}T00:00:00+08:00`);
+
+  if (
+    Number.isNaN(candidate.getTime()) ||
+    candidate.getFullYear() !== year ||
+    candidate.getMonth() + 1 !== month ||
+    candidate.getDate() !== day
+  ) {
+    return fallback;
+  }
+
+  return candidate;
+}
+
+function formatDateDisplay(value: string) {
+  return value.replace(/-/g, ".");
+}
 
 function Stars() {
   const points = useRef<THREE.Points>(null);
@@ -183,8 +219,8 @@ function Typewriter() {
   );
 }
 
-function LoveTimer() {
-  const startDate = useMemo(() => new Date("2026-03-25T00:00:00+08:00"), []);
+function LoveTimer({ startDateIso = START_DATE_ISO }: { startDateIso?: string }) {
+  const startDate = useMemo(() => parseStableDate(startDateIso), [startDateIso]);
   const [now, setNow] = useState<Date | null>(null);
 
   useEffect(() => {
@@ -648,6 +684,182 @@ function DateChoiceStage({
   );
 }
 
+function ModeLoading() {
+  return (
+    <main className="noise relative grid min-h-screen place-items-center overflow-hidden px-5 text-center">
+      <Starfield />
+      <div className="aurora fixed inset-[-10%] z-[1]" />
+      <div className="relative z-10">
+        <div className="mx-auto mb-5 grid h-11 w-11 place-items-center rounded-full bg-white text-[#171225]">
+          <Sparkles size={17} />
+        </div>
+        <p className="soft-text text-xl font-semibold">正在打开秘密页面</p>
+      </div>
+    </main>
+  );
+}
+
+function CosmosHome({
+  config,
+  snapshot,
+  onReplayConfession,
+  onResetPreview
+}: {
+  config: CosmosConfig;
+  snapshot: CosmosSnapshot | null;
+  onReplayConfession: () => void;
+  onResetPreview: () => void;
+}) {
+  const displayName = snapshot?.nickname || config.herNickname || "你";
+  const firstDateChoice = snapshot?.firstDateChoice ?? config.firstDateChoice;
+  const selectedDate = dateChoices.find((choice) => choice.id === firstDateChoice);
+  const confessionDate = snapshot?.confessionDate ?? config.confessionDate;
+  const heartbeatMatch = snapshot?.heartbeatMatch ?? "99.9%";
+
+  return (
+    <main className="noise relative min-h-screen overflow-hidden">
+      <Starfield />
+      <div className="aurora fixed inset-[-10%] z-[1]" />
+      <div className="pointer-events-none fixed inset-0 z-[2] bg-[radial-gradient(circle_at_center,transparent_0%,rgba(3,6,18,.2)_48%,rgba(3,6,18,.76)_100%)]" />
+
+      <section className="relative z-10 flex min-h-[100svh] items-center px-5 py-20 sm:px-8">
+        <div className="mx-auto grid max-w-6xl gap-8 lg:grid-cols-[1.08fr_.92fr] lg:items-center">
+          <motion.div initial={{ opacity: 0, y: 18, filter: "blur(12px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} transition={{ duration: 0.9 }}>
+            <div className="glass mb-6 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm text-white/68">
+              <Sparkles size={15} />
+              欢迎回来
+            </div>
+            <p className="mb-3 text-sm text-white/48">Chapter 02</p>
+            <h1 className="soft-text whitespace-pre-line text-[clamp(2.45rem,12vw,6.5rem)] font-semibold leading-[1.05]">
+              {`${config.coupleTitle}\n今天也亮着`}
+            </h1>
+            <p className="mt-6 max-w-2xl text-base leading-8 text-white/64 sm:text-lg">
+              从告白那天开始，这里不再只是一封信。它会慢慢收下我们的回忆、约会和以后才会发生的小事。
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <a href="#cosmos-timeline" className="min-h-12 rounded-full bg-[#fff7ee] px-6 py-3 text-sm font-medium text-[#121123] shadow-[0_0_38px_rgba(255,138,191,.2)]">
+                进入小宇宙
+              </a>
+              <button onClick={onReplayConfession} className="glass min-h-12 rounded-full px-6 py-3 text-sm text-white/78 transition hover:bg-white/14">
+                回看 Chapter 01
+              </button>
+            </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 22, filter: "blur(14px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            transition={{ duration: 1, delay: 0.1 }}
+            className="glass rounded-[28px] p-5 sm:p-6"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm text-white/46">我们的第一页</p>
+                <h2 className="mt-2 text-2xl font-semibold">双人模式已开启</h2>
+              </div>
+              <div className="rounded-full bg-[#fff7ee] px-3 py-1 text-xs font-medium text-[#171225]">{heartbeatMatch}</div>
+            </div>
+            <div className="mt-6 grid gap-3 text-sm text-white/66">
+              <div className="flex items-center justify-between gap-4 rounded-2xl bg-white/[0.06] px-4 py-3">
+                <span>称呼</span>
+                <span className="text-white">{displayName}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-2xl bg-white/[0.06] px-4 py-3">
+                <span>告白日期</span>
+                <span className="text-white">{formatDateDisplay(confessionDate)}</span>
+              </div>
+              <div className="rounded-2xl bg-white/[0.06] px-4 py-3">
+                <span className="text-white/52">第一场正式约会</span>
+                <p className="mt-1 text-lg font-semibold text-white">{selectedDate?.label ?? "还在认真期待"}</p>
+                {selectedDate ? <p className="mt-1 text-sm leading-6 text-white/52">{selectedDate.note}</p> : null}
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
+      <section id="cosmos-timeline" className="relative z-10 px-5 py-20 sm:px-8 sm:py-24">
+        <div className="mx-auto max-w-4xl text-center">
+          <p className="mb-2 text-sm text-white/50">从 {formatDateDisplay(config.startDate)} 那天开始</p>
+          <h2 className="soft-text mb-6 text-[clamp(2rem,8vw,4.4rem)] font-semibold leading-tight">时间还在继续</h2>
+          <p className="mb-7 text-sm text-white/42">你的名字开始写进我的时间里</p>
+          <LoveTimer startDateIso={config.startDate} />
+        </div>
+      </section>
+
+      <section className="relative z-10 px-5 py-20 sm:px-8 sm:py-24">
+        <div className="mx-auto max-w-6xl">
+          <div className="mb-10 flex flex-col gap-3">
+            <p className="text-sm text-white/50">先把这些放进小宇宙</p>
+            <h2 className="soft-text text-[clamp(2rem,8vw,4.8rem)] font-semibold leading-tight">回忆收藏</h2>
+          </div>
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {memories.map((memory, index) => (
+              <motion.article
+                key={memory.title}
+                initial={{ opacity: 0, y: 26 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, amount: 0.28 }}
+                transition={{ delay: index * 0.06 }}
+                style={{ rotate: memory.rotate }}
+                className="polaroid mx-auto w-full max-w-[21rem] rounded-[8px] p-3 pb-5 sm:max-w-none"
+              >
+                <div className="photo-glow aspect-[4/5] rounded-[5px]" />
+                <div className="mt-4 px-1">
+                  <p className="text-xs text-[#7b647a]">{memory.date}</p>
+                  <h3 className="mt-1 text-lg font-semibold">{memory.title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-[#6f596a]">{memory.note}</p>
+                </div>
+              </motion.article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="relative z-10 px-5 py-20 sm:px-8 sm:py-24">
+        <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-3">
+          <div className="glass rounded-[28px] p-5 sm:p-6 lg:col-span-2">
+            <p className="text-sm text-white/48">小宇宙收藏夹</p>
+            <h2 className="mt-2 text-3xl font-semibold">先放三样东西</h2>
+            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+              {[
+                ["第一页纪念卡", "Chapter 01"],
+                ["第一场正式约会", selectedDate?.label ?? "认真期待中"],
+                ["以后慢慢加的回忆", "预留给我们"]
+              ].map(([title, note]) => (
+                <div key={title} className="rounded-2xl border border-white/12 bg-white/[0.055] p-4">
+                  <p className="text-base font-semibold text-white">{title}</p>
+                  <p className="mt-2 text-sm leading-6 text-white/50">{note}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="glass rounded-[28px] p-5 sm:p-6">
+            <p className="text-sm text-white/48">下一次约会</p>
+            <h2 className="mt-2 text-3xl font-semibold">{selectedDate?.label ?? "等你安排"}</h2>
+            <p className="mt-4 leading-7 text-white/58">{selectedDate?.note ?? "小宇宙已经亮着，下一页可以慢慢写。"}</p>
+          </div>
+        </div>
+      </section>
+
+      {config.debugEnabled ? (
+        <button
+          type="button"
+          onClick={onResetPreview}
+          className="fixed right-4 top-4 z-50 rounded-full border border-white/14 bg-black/20 px-4 py-2 text-xs font-medium text-white/68 backdrop-blur-xl transition hover:bg-white/12 hover:text-white"
+        >
+          Reset preview
+        </button>
+      ) : null}
+      <div className="fixed left-4 top-4 z-40 hidden items-center gap-2 rounded-full border border-white/12 bg-black/10 px-4 py-2 text-sm text-white/52 backdrop-blur-xl sm:flex">
+        <Volume2 size={15} />
+        我们的小宇宙
+      </div>
+      <BackgroundMusic scene="ending" />
+    </main>
+  );
+}
+
 function createHearts() {
   for (let i = 0; i < 34; i += 1) {
     const heart = document.createElement("span");
@@ -698,6 +910,10 @@ export default function Home() {
   const lastTeaseAtRef = useRef(0);
   const dateChoiceTimerRef = useRef<number | null>(null);
   const [scene, setScene] = useState<SceneKey>("opening");
+  const [modeReady, setModeReady] = useState(false);
+  const [siteMode, setSiteMode] = useState<SiteMode>("confession");
+  const [cosmosConfig, setCosmosConfig] = useState<CosmosConfig>(DEFAULT_COSMOS_CONFIG);
+  const [cosmosSnapshot, setCosmosSnapshot] = useState<CosmosSnapshot | null>(null);
   const { scrollYProgress } = useScroll();
   const y = useTransform(scrollYProgress, [0, 1], ["0%", "8%"]);
   const hasFinalChoice = accepted || softAccepted;
@@ -710,6 +926,24 @@ export default function Home() {
       { y: 34, opacity: 0, filter: "blur(14px)" },
       { y: 0, opacity: 1, filter: "blur(0px)", duration: 1.2, stagger: 0.12, ease: "power3.out" }
     );
+  }, []);
+
+  useEffect(() => {
+    const syncCosmosState = () => {
+      const storedConfig = readCosmosConfig();
+      const storedSnapshot = readCosmosSnapshot();
+      setCosmosConfig(storedConfig);
+      setCosmosSnapshot(storedSnapshot);
+      setSiteMode(readSiteMode() ?? storedConfig.siteMode);
+      setModeReady(true);
+    };
+
+    syncCosmosState();
+    window.addEventListener("storage", syncCosmosState);
+
+    return () => {
+      window.removeEventListener("storage", syncCosmosState);
+    };
   }, []);
 
   useEffect(() => {
@@ -744,9 +978,42 @@ export default function Home() {
       window.clearTimeout(dateChoiceTimerRef.current);
       dateChoiceTimerRef.current = null;
     }
+    clearCosmosData();
+    writeSiteMode("confession");
+    setSiteMode("confession");
+    setCosmosSnapshot(null);
     document.body.style.background = "";
     window.requestAnimationFrame(() => {
       confessionSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, []);
+
+  const replayConfession = useCallback(() => {
+    setAccepted(false);
+    setSoftAccepted(false);
+    setEndingStage("idle");
+    setPermissionChoice(null);
+    setHeartbeatCount(0);
+    setNicknameInput("");
+    setNickname("");
+    setSelectedDateChoice(null);
+    setFlowResetVersion((version) => version + 1);
+    setThinking(false);
+    setThinkCount(0);
+    setEscapeCount(0);
+    setEscapeDone(false);
+    setSecretChoiceOpen(false);
+    setTeaseOffset({ x: 0, y: 0 });
+    lastTeaseAtRef.current = 0;
+    setScene("opening");
+    setSiteMode("confession");
+    document.body.style.background = "";
+    if (dateChoiceTimerRef.current) {
+      window.clearTimeout(dateChoiceTimerRef.current);
+      dateChoiceTimerRef.current = null;
+    }
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, behavior: "smooth" });
     });
   }, []);
 
@@ -875,9 +1142,25 @@ export default function Home() {
     setSelectedDateChoice(choice);
     createPetals();
     if (dateChoiceTimerRef.current) window.clearTimeout(dateChoiceTimerRef.current);
+    const nextSnapshot: CosmosSnapshot = {
+      nickname: nickname || cosmosConfig.herNickname || "你",
+      permissionChoice,
+      firstDateChoice: choice,
+      isSoftChoice: softAccepted,
+      heartbeatMatch: "99.9%",
+      confessionDate: cosmosConfig.confessionDate,
+      unlockedAt: new Date().toISOString()
+    };
+    unlockCosmos(nextSnapshot);
+    setCosmosSnapshot(nextSnapshot);
     dateChoiceTimerRef.current = window.setTimeout(() => {
       setEndingStage("couple");
-      dateChoiceTimerRef.current = null;
+      dateChoiceTimerRef.current = window.setTimeout(() => {
+        setSiteMode("cosmos");
+        document.body.style.background = "";
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        dateChoiceTimerRef.current = null;
+      }, 4200);
     }, 850);
   };
 
@@ -892,8 +1175,14 @@ export default function Home() {
           : endingStage === "keepsake"
             ? "留下我们的第一页"
             : endingStage === "date"
-              ? "选择我们的第一场约会"
-              : "给我们的秘密页面";
+            ? "选择我们的第一场约会"
+            : "给我们的秘密页面";
+
+  if (!modeReady) return <ModeLoading />;
+
+  if (siteMode === "cosmos") {
+    return <CosmosHome config={cosmosConfig} snapshot={cosmosSnapshot} onReplayConfession={replayConfession} onResetPreview={resetFlow} />;
+  }
 
   return (
     <main className="noise relative min-h-screen overflow-hidden">
@@ -970,9 +1259,9 @@ export default function Home() {
 
       <section data-scene="memories" className="relative z-10 px-5 py-20 sm:py-24">
         <div className="mx-auto max-w-4xl text-center">
-          <p className="mb-2 text-sm text-white/50">从 2026.03.25 那天开始</p>
+          <p className="mb-2 text-sm text-white/50">从 {formatDateDisplay(cosmosConfig.startDate)} 那天开始</p>
           <p className="mb-6 text-sm text-white/42">你的名字开始写进我的时间里</p>
-          <LoveTimer />
+          <LoveTimer startDateIso={cosmosConfig.startDate} />
         </div>
       </section>
 
@@ -1083,14 +1372,15 @@ export default function Home() {
       </section>
 
       <BackgroundMusic scene={scene} />
-      {/* Preview helper: comment out this button before sharing the final page. */}
-      <button
-        type="button"
-        onClick={resetFlow}
-        className="fixed right-4 top-4 z-50 rounded-full border border-white/14 bg-black/20 px-4 py-2 text-xs font-medium text-white/68 backdrop-blur-xl transition hover:bg-white/12 hover:text-white"
-      >
-        Reset flow
-      </button>
+      {cosmosConfig.debugEnabled ? (
+        <button
+          type="button"
+          onClick={resetFlow}
+          className="fixed right-4 top-4 z-50 rounded-full border border-white/14 bg-black/20 px-4 py-2 text-xs font-medium text-white/68 backdrop-blur-xl transition hover:bg-white/12 hover:text-white"
+        >
+          Reset flow
+        </button>
+      ) : null}
       <div className="fixed left-4 top-4 z-40 hidden items-center gap-2 rounded-full border border-white/12 bg-black/10 px-4 py-2 text-sm text-white/52 backdrop-blur-xl sm:flex">
         <Volume2 size={15} />
         {endingStage === "couple" ? "我们的小宇宙" : "私人放映中"}
