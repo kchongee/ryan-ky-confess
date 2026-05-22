@@ -1,19 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Check, RefreshCw, Save, Shield, Sparkles } from "lucide-react";
+import { ArrowLeft, Check, Plus, RefreshCw, Save, Shield, Sparkles, Trash2 } from "lucide-react";
 import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   clearCosmosData,
   COSMOS_DATE_CHOICES,
+  DEFAULT_COSMOS_CONTENT,
   DEFAULT_COSMOS_CONFIG,
+  readCosmosContent,
   readCosmosConfig,
   readCosmosSnapshot,
   readSiteMode,
+  writeCosmosContent,
   writeCosmosConfig,
   writeCosmosSnapshot,
   writeSiteMode,
   type CosmosConfig,
+  type CosmosContent,
+  type CosmosEvent,
+  type CosmosMemory,
+  type CosmosNote,
+  type CosmosPlace,
   type CosmosSnapshot,
   type DateChoiceId,
   type SiteMode
@@ -23,6 +31,10 @@ const enableRemoteAdmin = process.env.NEXT_PUBLIC_ENABLE_ADMIN === "true";
 
 function isLocalAdminHost(hostname: string) {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
+function makeLocalId(prefix: string) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
 function AdminShell({ children }: { children: ReactNode }) {
@@ -54,8 +66,12 @@ export default function AdminPage() {
   const [ready, setReady] = useState(false);
   const [allowed, setAllowed] = useState(false);
   const [config, setConfig] = useState<CosmosConfig>(DEFAULT_COSMOS_CONFIG);
+  const [content, setContent] = useState<CosmosContent>(DEFAULT_COSMOS_CONTENT);
   const [siteMode, setSiteMode] = useState<SiteMode>(DEFAULT_COSMOS_CONFIG.siteMode);
   const [snapshot, setSnapshot] = useState<CosmosSnapshot | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [placeDraft, setPlaceDraft] = useState({ name: "", note: "" });
+  const [eventDraft, setEventDraft] = useState({ date: DEFAULT_COSMOS_CONFIG.confessionDate, title: "", body: "" });
   const [status, setStatus] = useState("");
 
   useEffect(() => {
@@ -65,6 +81,7 @@ export default function AdminPage() {
     if (canUseAdmin) {
       const storedConfig = readCosmosConfig();
       setConfig(storedConfig);
+      setContent(readCosmosContent());
       setSiteMode(readSiteMode() ?? storedConfig.siteMode);
       setSnapshot(readCosmosSnapshot());
     }
@@ -81,9 +98,74 @@ export default function AdminPage() {
     setConfig((current) => ({ ...current, [key]: value }));
   };
 
-  const saveConfig = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const updateMemory = <Key extends keyof CosmosMemory>(id: string, key: Key, value: CosmosMemory[Key]) => {
+    setContent((current) => ({
+      ...current,
+      memories: current.memories.map((memory) => (memory.id === id ? { ...memory, [key]: value } : memory))
+    }));
+  };
 
+  const addNote = () => {
+    const body = noteDraft.trim();
+    if (!body) return;
+    const nextNote: CosmosNote = {
+      id: makeLocalId("note"),
+      body,
+      isPinned: false,
+      createdAt: new Date().toISOString()
+    };
+    setContent((current) => ({ ...current, notes: [nextNote, ...current.notes].slice(0, 40) }));
+    setNoteDraft("");
+  };
+
+  const removeNote = (id: string) => {
+    setContent((current) => ({ ...current, notes: current.notes.filter((note) => note.id !== id) }));
+  };
+
+  const togglePinnedNote = (id: string) => {
+    setContent((current) => ({
+      ...current,
+      notes: current.notes.map((note) => (note.id === id ? { ...note, isPinned: !note.isPinned } : note))
+    }));
+  };
+
+  const addPlace = () => {
+    const name = placeDraft.name.trim();
+    if (!name) return;
+    const nextPlace: CosmosPlace = {
+      id: makeLocalId("place"),
+      name,
+      note: placeDraft.note.trim() || "想和你一起去。",
+      status: "maybe",
+      createdAt: new Date().toISOString()
+    };
+    setContent((current) => ({ ...current, places: [nextPlace, ...current.places].slice(0, 30) }));
+    setPlaceDraft({ name: "", note: "" });
+  };
+
+  const removePlace = (id: string) => {
+    setContent((current) => ({ ...current, places: current.places.filter((place) => place.id !== id) }));
+  };
+
+  const addEvent = () => {
+    const title = eventDraft.title.trim();
+    if (!title) return;
+    const nextEvent: CosmosEvent = {
+      id: makeLocalId("event"),
+      date: eventDraft.date,
+      title,
+      body: eventDraft.body.trim() || "这一天也值得被记住。",
+      type: "memory"
+    };
+    setContent((current) => ({ ...current, events: [nextEvent, ...current.events].slice(0, 40) }));
+    setEventDraft({ date: config.confessionDate, title: "", body: "" });
+  };
+
+  const removeEvent = (id: string) => {
+    setContent((current) => ({ ...current, events: current.events.filter((event) => event.id !== id) }));
+  };
+
+  const saveCurrentState = () => {
     const nextConfig: CosmosConfig = {
       ...config,
       siteMode,
@@ -91,6 +173,7 @@ export default function AdminPage() {
       passcodeEnabled: false
     };
     const configOk = writeCosmosConfig(nextConfig);
+    const contentOk = writeCosmosContent(content);
     const modeOk = writeSiteMode(siteMode);
     let snapshotOk = true;
 
@@ -104,7 +187,12 @@ export default function AdminPage() {
     }
 
     setConfig(nextConfig);
-    setStatus(configOk && modeOk && snapshotOk ? "已保存到这个浏览器" : "保存失败，请检查浏览器是否阻止 localStorage");
+    setStatus(configOk && contentOk && modeOk && snapshotOk ? "已保存到这个浏览器" : "保存失败，请检查浏览器是否阻止 localStorage");
+  };
+
+  const saveConfig = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    saveCurrentState();
   };
 
   const resetSafe = () => {
@@ -113,6 +201,7 @@ export default function AdminPage() {
 
     clearCosmosData({ includeConfig: true });
     setConfig(DEFAULT_COSMOS_CONFIG);
+    setContent(DEFAULT_COSMOS_CONTENT);
     setSiteMode(DEFAULT_COSMOS_CONFIG.siteMode);
     setSnapshot(null);
     setStatus("已回到安全默认值");
@@ -150,7 +239,8 @@ export default function AdminPage() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1.2fr_.8fr]">
-        <form onSubmit={saveConfig} className="glass rounded-[28px] p-5 sm:p-6">
+        <div className="grid gap-6">
+          <form onSubmit={saveConfig} className="glass rounded-[28px] p-5 sm:p-6">
           <div className="mb-6 flex items-start justify-between gap-4">
             <div>
               <p className="text-sm text-white/48">站点模式</p>
@@ -247,7 +337,149 @@ export default function AdminPage() {
             <Save size={16} />
             保存设置
           </button>
-        </form>
+          </form>
+
+          <section className="glass rounded-[28px] p-5 sm:p-6">
+            <div className="mb-6">
+              <p className="text-sm text-white/48">本地内容管理</p>
+              <h2 className="mt-1 text-2xl font-semibold">先把小宇宙撑起来</h2>
+            </div>
+
+            <div className="grid gap-4">
+              <div className="rounded-2xl border border-white/12 bg-white/[0.045] p-4">
+                <p className="mb-3 text-sm font-medium text-white/72">回忆卡片</p>
+                <div className="grid gap-3">
+                  {content.memories.map((memory) => (
+                    <div key={memory.id} className="grid gap-2 rounded-2xl bg-white/[0.05] p-3 sm:grid-cols-[.8fr_1fr]">
+                      <input
+                        value={memory.title}
+                        onChange={(event) => updateMemory(memory.id, "title", event.target.value)}
+                        className="min-h-11 rounded-xl border border-white/12 bg-white/[0.07] px-3 text-sm text-white outline-none focus:border-white/34"
+                      />
+                      <input
+                        value={memory.note}
+                        onChange={(event) => updateMemory(memory.id, "note", event.target.value)}
+                        className="min-h-11 rounded-xl border border-white/12 bg-white/[0.07] px-3 text-sm text-white outline-none focus:border-white/34"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/12 bg-white/[0.045] p-4">
+                <p className="mb-3 text-sm font-medium text-white/72">小纸条</p>
+                <div className="flex gap-2">
+                  <input
+                    value={noteDraft}
+                    onChange={(event) => setNoteDraft(event.target.value)}
+                    placeholder="写一张以后会被她看到的小纸条"
+                    className="min-h-11 min-w-0 flex-1 rounded-xl border border-white/12 bg-white/[0.07] px-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/34"
+                  />
+                  <button type="button" onClick={addNote} className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#fff7ee] text-[#121123]">
+                    <Plus size={17} />
+                  </button>
+                </div>
+                <div className="mt-3 grid gap-2">
+                  {content.notes.map((note) => (
+                    <div key={note.id} className="flex items-start gap-2 rounded-xl bg-white/[0.05] p-3 text-sm text-white/68">
+                      <button type="button" onClick={() => togglePinnedNote(note.id)} className={`mt-0.5 rounded-full px-2 py-1 text-xs ${note.isPinned ? "bg-[#ffd6e7] text-[#171225]" : "bg-white/[0.08] text-white/52"}`}>
+                        置顶
+                      </button>
+                      <p className="min-w-0 flex-1 leading-6">{note.body}</p>
+                      <button type="button" onClick={() => removeNote(note.id)} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/[0.08] text-white/54">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="rounded-2xl border border-white/12 bg-white/[0.045] p-4">
+                  <p className="mb-3 text-sm font-medium text-white/72">想一起去的地方</p>
+                  <div className="grid gap-2">
+                    <input
+                      value={placeDraft.name}
+                      onChange={(event) => setPlaceDraft((current) => ({ ...current, name: event.target.value }))}
+                      placeholder="地方名字"
+                      className="min-h-11 rounded-xl border border-white/12 bg-white/[0.07] px-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/34"
+                    />
+                    <input
+                      value={placeDraft.note}
+                      onChange={(event) => setPlaceDraft((current) => ({ ...current, note: event.target.value }))}
+                      placeholder="为什么想去"
+                      className="min-h-11 rounded-xl border border-white/12 bg-white/[0.07] px-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/34"
+                    />
+                    <button type="button" onClick={addPlace} className="min-h-11 rounded-full bg-white/[0.09] text-sm text-white/76 transition hover:bg-white/[0.14]">
+                      加进小宇宙
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-2">
+                    {content.places.map((place) => (
+                      <div key={place.id} className="flex items-start gap-2 rounded-xl bg-white/[0.05] p-3 text-sm text-white/64">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-white">{place.name}</p>
+                          <p className="mt-1 leading-5">{place.note}</p>
+                        </div>
+                        <button type="button" onClick={() => removePlace(place.id)} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/[0.08] text-white/54">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/12 bg-white/[0.045] p-4">
+                  <p className="mb-3 text-sm font-medium text-white/72">时间线</p>
+                  <div className="grid gap-2">
+                    <input
+                      type="date"
+                      value={eventDraft.date}
+                      onChange={(event) => setEventDraft((current) => ({ ...current, date: event.target.value }))}
+                      className="min-h-11 rounded-xl border border-white/12 bg-white/[0.07] px-3 text-sm text-white outline-none focus:border-white/34"
+                    />
+                    <input
+                      value={eventDraft.title}
+                      onChange={(event) => setEventDraft((current) => ({ ...current, title: event.target.value }))}
+                      placeholder="发生了什么"
+                      className="min-h-11 rounded-xl border border-white/12 bg-white/[0.07] px-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/34"
+                    />
+                    <input
+                      value={eventDraft.body}
+                      onChange={(event) => setEventDraft((current) => ({ ...current, body: event.target.value }))}
+                      placeholder="那天想记住的细节"
+                      className="min-h-11 rounded-xl border border-white/12 bg-white/[0.07] px-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/34"
+                    />
+                    <button type="button" onClick={addEvent} className="min-h-11 rounded-full bg-white/[0.09] text-sm text-white/76 transition hover:bg-white/[0.14]">
+                      加到时间线
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-2">
+                    {content.events.map((event) => (
+                      <div key={event.id} className="flex items-start gap-2 rounded-xl bg-white/[0.05] p-3 text-sm text-white/64">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs text-white/38">{event.date}</p>
+                          <p className="mt-1 font-medium text-white">{event.title}</p>
+                        </div>
+                        <button type="button" onClick={() => removeEvent(event.id)} className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/[0.08] text-white/54">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={saveCurrentState}
+              className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-[#fff7ee] px-6 text-sm font-medium text-[#121123] shadow-[0_0_38px_rgba(255,138,191,.22)]"
+            >
+              <Save size={16} />
+              保存内容
+            </button>
+          </section>
+        </div>
 
         <aside className="grid gap-6">
           <section className="glass rounded-[28px] p-5 sm:p-6">
