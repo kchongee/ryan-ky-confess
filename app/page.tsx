@@ -9,13 +9,16 @@ import * as THREE from "three";
 import {
   clearCosmosData,
   COSMOS_DATE_CHOICES,
+  DEFAULT_COSMOS_CONTENT,
   DEFAULT_COSMOS_CONFIG,
+  readCosmosContent,
   readCosmosConfig,
   readCosmosSnapshot,
   readSiteMode,
   unlockCosmos,
   writeSiteMode,
   type CosmosConfig,
+  type CosmosContent,
   type CosmosSnapshot,
   type DateChoiceId,
   type PermissionChoice,
@@ -65,33 +68,6 @@ const confessionLines = [
   "可能是你认真讲话的时候。",
   "又或者……",
   "只是因为，那个人是你。"
-];
-
-const memories = [
-  {
-    date: "那天傍晚",
-    title: "第一次一起吃饭",
-    note: "我装作很自然，其实心跳一直很大声。",
-    rotate: "-2.2deg"
-  },
-  {
-    date: "某个午后",
-    title: "你笑起来的时候",
-    note: "世界像被调低了音量，只剩下你。",
-    rotate: "1.4deg"
-  },
-  {
-    date: "深夜聊天",
-    title: "你认真讲话",
-    note: "我突然觉得，温柔原来可以这么具体。",
-    rotate: "-1.1deg"
-  },
-  {
-    date: "普通的一天",
-    title: "路灯很好看",
-    note: "其实不是路灯，是你在旁边。",
-    rotate: "2deg"
-  }
 ];
 
 const permissionItems = ["每天想你", "看到好看的东西想发给你", "晚安认真说", "见到你还是会紧张", "偷偷把你放进未来计划"];
@@ -701,11 +677,13 @@ function ModeLoading() {
 
 function CosmosHome({
   config,
+  content,
   snapshot,
   onReplayConfession,
   onResetPreview
 }: {
   config: CosmosConfig;
+  content: CosmosContent;
   snapshot: CosmosSnapshot | null;
   onReplayConfession: () => void;
   onResetPreview: () => void;
@@ -715,6 +693,23 @@ function CosmosHome({
   const selectedDate = dateChoices.find((choice) => choice.id === firstDateChoice);
   const confessionDate = snapshot?.confessionDate ?? config.confessionDate;
   const heartbeatMatch = snapshot?.heartbeatMatch ?? "99.9%";
+  const timelineEvents = [
+    ...content.events,
+    ...(selectedDate
+      ? [
+          {
+            id: "first-date-selected",
+            date: confessionDate,
+            title: "第一场正式约会",
+            body: `${selectedDate.label}，${selectedDate.note}`,
+            type: "date" as const
+          }
+        ]
+      : [])
+  ].slice(0, 5);
+  const pinnedNotes = content.notes.filter((note) => note.isPinned).slice(0, 2);
+  const places = content.places.slice(0, 3);
+  const photos = content.photos.slice(0, 4);
 
   return (
     <main className="noise relative min-h-screen overflow-hidden">
@@ -794,9 +789,9 @@ function CosmosHome({
             <h2 className="soft-text text-[clamp(2rem,8vw,4.8rem)] font-semibold leading-tight">回忆收藏</h2>
           </div>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {memories.map((memory, index) => (
+            {content.memories.map((memory, index) => (
               <motion.article
-                key={memory.title}
+                key={memory.id}
                 initial={{ opacity: 0, y: 26 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, amount: 0.28 }}
@@ -815,6 +810,73 @@ function CosmosHome({
           </div>
         </div>
       </section>
+
+      <section className="relative z-10 px-5 py-20 sm:px-8 sm:py-24">
+        <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[.95fr_1.05fr]">
+          <div className="glass rounded-[28px] p-5 sm:p-6">
+            <p className="text-sm text-white/48">时间线</p>
+            <h2 className="mt-2 text-3xl font-semibold">故事继续亮着</h2>
+            <div className="mt-6 grid gap-3">
+              {timelineEvents.map((event) => (
+                <div key={event.id} className="rounded-2xl border border-white/12 bg-white/[0.055] p-4">
+                  <p className="text-xs text-white/40">{formatDateDisplay(event.date)}</p>
+                  <p className="mt-1 text-base font-semibold text-white">{event.title}</p>
+                  <p className="mt-2 text-sm leading-6 text-white/52">{event.body}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-6">
+            <div className="glass rounded-[28px] p-5 sm:p-6">
+              <p className="text-sm text-white/48">小纸条</p>
+              <div className="mt-4 grid gap-3">
+                {(pinnedNotes.length ? pinnedNotes : content.notes.slice(0, 2)).map((note) => (
+                  <p key={note.id} className="rounded-2xl bg-white/[0.06] p-4 text-sm leading-7 text-white/64">
+                    {note.body}
+                  </p>
+                ))}
+              </div>
+            </div>
+            <div className="glass rounded-[28px] p-5 sm:p-6">
+              <p className="text-sm text-white/48">想一起去的地方</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                {places.map((place) => (
+                  <div key={place.id} className="rounded-2xl bg-white/[0.06] p-4">
+                    <p className="text-base font-semibold text-white">{place.name}</p>
+                    <p className="mt-2 text-sm leading-6 text-white/50">{place.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {photos.length ? (
+        <section className="relative z-10 px-5 py-20 sm:px-8 sm:py-24">
+          <div className="mx-auto max-w-6xl">
+            <div className="mb-10 flex flex-col gap-3">
+              <p className="text-sm text-white/50">后来收进来的照片</p>
+              <h2 className="soft-text text-[clamp(2rem,8vw,4.8rem)] font-semibold leading-tight">照片收藏</h2>
+            </div>
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              {photos.map((photo) => (
+                <article key={photo.id} className="polaroid rounded-[8px] p-3 pb-5">
+                  {photo.imageUrl ? (
+                    <img src={photo.imageUrl} alt={photo.caption} className="aspect-[4/5] w-full rounded-[5px] object-cover" />
+                  ) : (
+                    <div className="photo-glow aspect-[4/5] rounded-[5px]" />
+                  )}
+                  <div className="mt-4 px-1">
+                    <p className="text-xs text-[#7b647a]">{formatDateDisplay(photo.date)}</p>
+                    <h3 className="mt-1 text-lg font-semibold">{photo.caption}</h3>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <section className="relative z-10 px-5 py-20 sm:px-8 sm:py-24">
         <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-3">
@@ -913,6 +975,7 @@ export default function Home() {
   const [modeReady, setModeReady] = useState(false);
   const [siteMode, setSiteMode] = useState<SiteMode>("confession");
   const [cosmosConfig, setCosmosConfig] = useState<CosmosConfig>(DEFAULT_COSMOS_CONFIG);
+  const [cosmosContent, setCosmosContent] = useState<CosmosContent>(DEFAULT_COSMOS_CONTENT);
   const [cosmosSnapshot, setCosmosSnapshot] = useState<CosmosSnapshot | null>(null);
   const { scrollYProgress } = useScroll();
   const y = useTransform(scrollYProgress, [0, 1], ["0%", "8%"]);
@@ -931,8 +994,10 @@ export default function Home() {
   useEffect(() => {
     const syncCosmosState = () => {
       const storedConfig = readCosmosConfig();
+      const storedContent = readCosmosContent();
       const storedSnapshot = readCosmosSnapshot();
       setCosmosConfig(storedConfig);
+      setCosmosContent(storedContent);
       setCosmosSnapshot(storedSnapshot);
       setSiteMode(readSiteMode() ?? storedConfig.siteMode);
       setModeReady(true);
@@ -1181,7 +1246,7 @@ export default function Home() {
   if (!modeReady) return <ModeLoading />;
 
   if (siteMode === "cosmos") {
-    return <CosmosHome config={cosmosConfig} snapshot={cosmosSnapshot} onReplayConfession={replayConfession} onResetPreview={resetFlow} />;
+    return <CosmosHome config={cosmosConfig} content={cosmosContent} snapshot={cosmosSnapshot} onReplayConfession={replayConfession} onResetPreview={resetFlow} />;
   }
 
   return (
@@ -1234,9 +1299,9 @@ export default function Home() {
             <h2 className="soft-text text-[clamp(2rem,9vw,5rem)] font-semibold leading-tight">如果回忆有底片</h2>
           </div>
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {memories.map((memory, index) => (
+            {cosmosContent.memories.map((memory, index) => (
               <motion.article
-                key={memory.title}
+                key={memory.id}
                 initial={{ opacity: 0, y: 26 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, amount: 0.28 }}
