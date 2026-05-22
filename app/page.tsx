@@ -16,9 +16,11 @@ import {
   readCosmosSnapshot,
   readSiteMode,
   unlockCosmos,
+  writeCosmosContent,
   writeSiteMode,
   type CosmosConfig,
   type CosmosContent,
+  type CosmosPhoto,
   type CosmosSnapshot,
   type DateChoiceId,
   type PermissionChoice,
@@ -100,6 +102,53 @@ function parseStableDate(value: string) {
 
 function formatDateDisplay(value: string) {
   return value.replace(/-/g, ".");
+}
+
+function makeLocalId(prefix: string) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Image failed to load"));
+    image.src = src;
+  });
+}
+
+async function createCompressedPhoto(file: File, source: CosmosPhoto["source"]) {
+  const dataUrl = await readFileAsDataUrl(file);
+  const image = await loadImage(dataUrl);
+  const maxSide = 1280;
+  const ratio = Math.min(1, maxSide / Math.max(image.width, image.height));
+  const width = Math.max(1, Math.round(image.width * ratio));
+  const height = Math.max(1, Math.round(image.height * ratio));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas is not available");
+  context.drawImage(image, 0, 0, width, height);
+
+  const now = new Date();
+  return {
+    id: makeLocalId("photo"),
+    imageUrl: canvas.toDataURL("image/jpeg", 0.76),
+    caption: source === "camera" ? "刚刚拍下的回忆" : "新收进来的照片",
+    date: now.toISOString().slice(0, 10),
+    createdAt: now.toISOString(),
+    source
+  } satisfies CosmosPhoto;
 }
 
 function Stars() {
@@ -679,15 +728,18 @@ function CosmosHome({
   config,
   content,
   snapshot,
+  onAddPhoto,
   onReplayConfession,
   onResetPreview
 }: {
   config: CosmosConfig;
   content: CosmosContent;
   snapshot: CosmosSnapshot | null;
+  onAddPhoto: (photo: CosmosPhoto) => boolean;
   onReplayConfession: () => void;
   onResetPreview: () => void;
 }) {
+  const [photoStatus, setPhotoStatus] = useState("");
   const displayName = snapshot?.nickname || config.herNickname || "你";
   const firstDateChoice = snapshot?.firstDateChoice ?? config.firstDateChoice;
   const selectedDate = dateChoices.find((choice) => choice.id === firstDateChoice);
@@ -710,6 +762,19 @@ function CosmosHome({
   const pinnedNotes = content.notes.filter((note) => note.isPinned).slice(0, 2);
   const places = content.places.slice(0, 3);
   const photos = content.photos.slice(0, 4);
+
+  const handlePhotoFile = async (file: File | undefined, source: CosmosPhoto["source"]) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    setPhotoStatus("正在把照片收进小宇宙");
+
+    try {
+      const photo = await createCompressedPhoto(file, source);
+      const saved = onAddPhoto(photo);
+      setPhotoStatus(saved ? "照片已经收好了" : "照片太大或浏览器阻止储存");
+    } catch {
+      setPhotoStatus("这张照片暂时收不进去");
+    }
+  };
 
   return (
     <main className="noise relative min-h-screen overflow-hidden">
@@ -874,6 +939,43 @@ function CosmosHome({
                 </article>
               ))}
             </div>
+          </div>
+        </section>
+      ) : null}
+
+      {config.uploadEnabled ? (
+        <section className="relative z-10 px-5 py-20 sm:px-8 sm:py-24">
+          <div className="glass mx-auto max-w-3xl rounded-[28px] p-5 text-center sm:p-6">
+            <p className="text-sm text-white/48">新的回忆</p>
+            <h2 className="mt-2 text-3xl font-semibold">把这一刻也收进来</h2>
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <label className="min-h-12 cursor-pointer rounded-full bg-[#fff7ee] px-6 py-3 text-sm font-medium text-[#121123] shadow-[0_0_38px_rgba(255,138,191,.2)]">
+                上传照片
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={(event) => {
+                    void handlePhotoFile(event.target.files?.[0], "upload");
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+              <label className="glass min-h-12 cursor-pointer rounded-full px-6 py-3 text-sm text-white/78 transition hover:bg-white/14">
+                打开相机
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="sr-only"
+                  onChange={(event) => {
+                    void handlePhotoFile(event.target.files?.[0], "camera");
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+            </div>
+            {photoStatus ? <p className="mt-4 text-sm text-white/48">{photoStatus}</p> : null}
           </div>
         </section>
       ) : null}
@@ -1082,6 +1184,18 @@ export default function Home() {
     });
   }, []);
 
+  const addCosmosPhoto = useCallback(
+    (photo: CosmosPhoto) => {
+      const nextContent: CosmosContent = {
+        ...cosmosContent,
+        photos: [photo, ...cosmosContent.photos].slice(0, 18)
+      };
+      setCosmosContent(nextContent);
+      return writeCosmosContent(nextContent);
+    },
+    [cosmosContent]
+  );
+
   const enterEndingAtmosphere = (soft = false) => {
     setScene("ending");
     createHearts();
@@ -1246,7 +1360,16 @@ export default function Home() {
   if (!modeReady) return <ModeLoading />;
 
   if (siteMode === "cosmos") {
-    return <CosmosHome config={cosmosConfig} content={cosmosContent} snapshot={cosmosSnapshot} onReplayConfession={replayConfession} onResetPreview={resetFlow} />;
+    return (
+      <CosmosHome
+        config={cosmosConfig}
+        content={cosmosContent}
+        snapshot={cosmosSnapshot}
+        onAddPhoto={addCosmosPhoto}
+        onReplayConfession={replayConfession}
+        onResetPreview={resetFlow}
+      />
+    );
   }
 
   return (

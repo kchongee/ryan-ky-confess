@@ -367,7 +367,7 @@ export function normalizeCosmosConfig(value: unknown): CosmosConfig {
     herNickname: cleanText(value.herNickname, DEFAULT_COSMOS_CONFIG.herNickname, 32),
     firstDateChoice: isDateChoiceId(value.firstDateChoice) ? value.firstDateChoice : null,
     debugEnabled: value.debugEnabled === true,
-    uploadEnabled: false,
+    uploadEnabled: value.uploadEnabled === true,
     passcodeEnabled: false
   };
 }

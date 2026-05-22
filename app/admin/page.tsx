@@ -169,7 +169,6 @@ export default function AdminPage() {
     const nextConfig: CosmosConfig = {
       ...config,
       siteMode,
-      uploadEnabled: false,
       passcodeEnabled: false
     };
     const configOk = writeCosmosConfig(nextConfig);
@@ -328,9 +327,19 @@ export default function AdminPage() {
             />
           </label>
 
+          <label className="mt-3 flex items-center justify-between gap-4 rounded-2xl border border-white/12 bg-white/[0.05] px-4 py-3 text-sm text-white/72">
+            开放本地照片上传
+            <input
+              type="checkbox"
+              checked={config.uploadEnabled}
+              onChange={(event) => updateConfig("uploadEnabled", event.target.checked)}
+              className="h-5 w-5 accent-[#ffd6e7]"
+            />
+          </label>
+
           <div className="mt-5 rounded-2xl border border-white/12 bg-white/[0.045] p-4">
-            <p className="text-sm font-medium text-white/76">未来功能已收起</p>
-            <p className="mt-2 text-sm leading-6 text-white/48">上传照片和密码保护会放到 Supabase 长期版。当前 admin 不显示这些开关，也会固定保存为关闭，避免误以为已经上线。</p>
+            <p className="text-sm font-medium text-white/76">密码保护仍先收起</p>
+            <p className="mt-2 text-sm leading-6 text-white/48">照片上传目前是本机预览，会压缩后存在这个浏览器。真正长期同步要等 Supabase Storage 接上后再开放。</p>
           </div>
 
           <button type="submit" className="mt-6 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-full bg-[#fff7ee] px-6 text-sm font-medium text-[#121123] shadow-[0_0_38px_rgba(255,138,191,.22)]">
